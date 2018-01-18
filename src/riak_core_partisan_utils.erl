@@ -37,33 +37,33 @@
 %% distinction for portability but they both function mostly the same: until we need
 %% the distinction.
 
-cast(Tag, Destination, Message) ->
+cast(Channel, Destination, Message) ->
     Options = [noconnect, nosuspend],
-    bang(Tag, Destination, {'$gen_cast', Message}, Options),
+    bang(Channel, Destination, {'$gen_cast', Message}, Options),
     ok.
 
-bang_unreliable(Tag, Destination, Message) ->
-    bang(Tag, Destination, Message, [noconnect, nosuspend]).
+bang_unreliable(Channel, Destination, Message) ->
+    bang(Channel, Destination, Message, [noconnect, nosuspend]).
 
-bang_reliable(Tag, Destination, Message) ->
-    bang(Tag, Destination, Message, []).
+bang_reliable(Channel, Destination, Message) ->
+    bang(Channel, Destination, Message, []).
 
-bang(Tag, Pid, Message, _Options) when is_pid(Pid) ->
+bang(Channel, Pid, Message, _Options) when is_pid(Pid) ->
     Node = node(Pid),
-    forward(Tag, Node, Pid, Message),
+    forward(Channel, Node, Pid, Message),
     Message;
-bang(_Tag, Port, Message, Options) when is_port(Port) ->
+bang(_Channel, Port, Message, Options) when is_port(Port) ->
     catch erlang:send(Port, Message, Options),
     Message;
-bang(_Tag, RegName, Message, Options) when is_atom(RegName) ->
+bang(_Channel, RegName, Message, Options) when is_atom(RegName) ->
     catch erlang:send(RegName, Message, Options),
     Message;
-bang(Tag, {RegName, Node}, Message, _Options) when is_atom(RegName) ->
-    forward(Tag, Node, RegName, Message),
+bang(Channel, {RegName, Node}, Message, _Options) when is_atom(RegName) ->
+    forward(Channel, Node, RegName, Message),
     Message.
 
-forward(Type0, Peer, Module, Message) ->
-    Type = rewrite_type(Type0),
+forward(Channel0, Peer, Module, Message) ->
+    {ok, {Channel, Options}} = channel_and_options(Channel0),
 
     case should_dispatch() of
         false ->
@@ -83,7 +83,7 @@ forward(Type0, Peer, Module, Message) ->
         true ->
             Manager = partisan_config:get(partisan_peer_service_manager,
                                           partisan_default_peer_service_manager),
-            Manager:forward_message(Peer, Type, Module, Message)
+            Manager:forward_message(Peer, Channel, Module, Message, Options)
     end.
 
 update(Nodes) ->
@@ -137,15 +137,20 @@ configure_dispatch() ->
     partisan_mochiglobal:put(partisan_dispatch, Dispatch).
 
 %% @private
-rewrite_type(Type) ->
-    case Type of
+channel_and_options(Channel) ->
+    case Channel of
+        {vnode, Identifier} ->
+            %% Use partition key routing based on vnode identifier.
+            {ok, {vnode, [{partition_key, Identifier}]}};
         vnode ->
-            vnode;
+            %% Use the vnode channel.
+            {ok, {vnode, []}};
         gossip ->
             %% Gossip should dispatch using a monotonic channel.
-            {monotonic, gossip};
+            {ok, {{monotonic, gossip}, []}};
         broadcast ->
-            broadcast;
+            %% Use the broadcast channel.
+            {ok, {broadcast, []}};
         Other ->
             lager:error("Unknown message type for partisan dispatch: ~p", [Other]),
             exit({error, {unknown_partisan_dispatch_type, Other}})
