@@ -133,6 +133,15 @@ configure_dispatch() ->
         Other ->
             Other
     end,
+    %% Partisan itself has a short-circuit for message routing, if 
+    %% the forward_message API is used directly.  Ensure the short-circuit
+    %% is configured properly.
+    case Dispatch of
+        true ->
+            partisan_config:set(disterl, false);
+        false ->
+            partisan_config:set(disterl, true)
+    end,
     lager:info("Configuring partisan dispatch: ~p", [Dispatch]),
     partisan_mochiglobal:put(partisan_dispatch, Dispatch).
 
