@@ -60,7 +60,12 @@ bang(_Channel, RegName, Message, Options) when is_atom(RegName) ->
     Message;
 bang(Channel, {RegName, Node}, Message, _Options) when is_atom(RegName) ->
     forward(Channel, Node, RegName, Message),
-    Message.
+    Message;
+bang(Channel, {partisan_remote_reference, Node, ProcessRef}, Message, _Options) ->
+    forward(Channel, Node, ProcessRef, Message),
+    Message;
+bang(_Channel, Reference, _Message, _Options) ->
+    exit({cannot_send_message, Reference}).
 
 forward(Channel0, Peer, Module, Message) ->
     {ok, {Channel, Options}} = channel_and_options(Channel0),
@@ -147,10 +152,17 @@ configure_dispatch() ->
 
 %% @private
 channel_and_options(Channel) ->
+    UseCausalDelivery = partisan_config:get(causal_delivery, false),
+
     case Channel of
         {vnode, Identifier} ->
             %% Use partition key routing based on vnode identifier.
-            {ok, {vnode, [{partition_key, Identifier}]}};
+            case UseCausalDelivery of
+                true ->
+                    {ok, {vnode, [{partition_key, Identifier}, {causal_label, vnode}]}};
+                false ->
+                    {ok, {vnode, [{partition_key, Identifier}]}}
+            end;
         vnode ->
             %% Use the vnode channel.
             {ok, {vnode, []}};
